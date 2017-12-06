@@ -43,18 +43,21 @@ type Adapter struct {
 	Endpoint    string `mapstructure:"endpoint"` // Required
 	UserSyncURL string `mapstructure:"usersync_url"`
 	PlatformID  string `mapstructure:"platform_id"` // needed for Facebook
-	XAPI        struct {
+	XAPI struct {
 		Username string `mapstructure:"username"`
 		Password string `mapstructure:"password"`
 		Tracker  string `mapstructure:"tracker"`
-	} `mapstructure:"xapi"` // needed for Rubicon
+	} `mapstructure:"xapi"`                         // needed for Rubicon
 }
 
 type Metrics struct {
+	Type     string `mapstructure:"type"`
 	Host     string `mapstructure:"host"`
 	Database string `mapstructure:"database"`
 	Username string `mapstructure:"username"`
 	Password string `mapstructure:"password"`
+	Interval int64  `mapstructure:"interval"`
+	Prefix   string `mapstructure:"prefix"`
 }
 
 type DataCache struct {
