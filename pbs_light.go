@@ -57,6 +57,7 @@ import (
 	"github.com/prebid/prebid-server/stored_requests/backends/empty_fetcher"
 	"github.com/prebid/prebid-server/stored_requests/backends/file_fetcher"
 	"strings"
+	"github.com/prebid/prebid-server/logging"
 )
 
 type DomainMetrics struct {
@@ -189,7 +190,12 @@ type cookieSyncResponse struct {
 	BidderStatus []*pbs.PBSBidder `json:"bidder_status"`
 }
 
-func cookieSync(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
+type CookieSyncDeps struct{
+	Logger *logging.TransactionLogger
+	url string
+}
+
+func (c *CookieSyncDeps) cookieSync(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
 	mCookieSyncMeter.Mark(1)
 	userSyncCookie := pbs.ParsePBSCookieFromRequest(r, &(hostCookieSettings.OptOutCookie))
 	if !userSyncCookie.AllowSyncs() {
@@ -237,6 +243,7 @@ func cookieSync(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
 	enc.SetEscapeHTML(false)
 	//enc.SetIndent("", "  ")
 	enc.Encode(csResp)
+	(*c.Logger).LogTransaction(c.url, string(csReq), string(csResp), http.StatusOK )
 }
 
 type auctionDeps struct {
@@ -785,12 +792,15 @@ func makeExchangeMetrics(adapterOrAccount string) map[string]*AdapterMetrics {
 	return adapterMetrics
 }
 
+const AUCTION, OPENRTB2_AUCTION, COOKIESYNC string = "/auction", "/openrtb2/auction", "/cookiesync"
+
 func serve(cfg *config.Configuration) error {
 	if err := loadDataCache(cfg); err != nil {
 		return fmt.Errorf("Prebid Server could not load data cache: %v", err)
 	}
 
 	setupExchanges(cfg)
+	logger := logging.SetupLogging(cfg.Metrics, exchanges)
 
 	if cfg.Metrics.Host != "" {
 		go influxdb.InfluxDB(
@@ -847,16 +857,17 @@ func serve(cfg *config.Configuration) error {
 		glog.Fatalf("Failed to initialize config backends. %v", err)
 	}
 
-	openrtbEndpoint, err := openrtb2.NewEndpoint(theExchange, paramsValidator, byId, cfg)
+	openrtbEndpoint, err := openrtb2.NewEndpoint(theExchange, paramsValidator, byId, cfg, &logger, OPENRTB2_AUCTION)
 	if err != nil {
 		glog.Fatalf("Failed to create the openrtb endpoint handler. %v", err)
 	}
 
 	router := httprouter.New()
-	router.POST("/auction", (&auctionDeps{cfg}).auction)
-	router.POST("/openrtb2/auction", openrtbEndpoint)
+	router.POST(AUCTION, (&auctionDeps{cfg}).auction)
+	router.POST(OPENRTB2_AUCTION, openrtbEndpoint)
 	router.GET("/bidders/params", NewJsonDirectoryServer(paramsValidator))
-	router.POST("/cookie_sync", cookieSync)
+	router.POST(COOKIESYNC, (&CookieSyncDeps{&logger, COOKIESYNC}).cookieSync)
+
 	router.POST("/validate", validate)
 	router.GET("/status", status)
 	router.GET("/", serveIndex)

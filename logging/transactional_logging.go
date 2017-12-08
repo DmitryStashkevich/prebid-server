@@ -2,65 +2,25 @@ package logging
 
 import (
 	"github.com/rcrowley/go-metrics"
-	"sync"
+	"github.com/prebid/prebid-server/config"
+	"github.com/prebid/prebid-server/adapters"
 )
 
 type DomainMetrics struct {
 	RequestMeter metrics.Meter
 }
 
-type AccountMetrics struct {
-	RequestMeter      metrics.Meter
-	BidsReceivedMeter metrics.Meter
-	PriceHistogram    metrics.Histogram
-	// store account by adapter metrics. Type is map[PBSBidder.BidderCode]
-	AdapterMetrics map[string]*AdapterMetrics
-}
-
-type AdapterMetrics struct {
-	NoCookieMeter     metrics.Meter
-	ErrorMeter        metrics.Meter
-	NoBidMeter        metrics.Meter
-	TimeoutMeter      metrics.Meter
-	RequestMeter      metrics.Meter
-	RequestTimer      metrics.Timer
-	PriceHistogram    metrics.Histogram
-	BidsReceivedMeter metrics.Meter
-}
-
-var (
-	metricsRegistry      metrics.Registry
-	mRequestMeter        metrics.Meter
-	mAppRequestMeter     metrics.Meter
-	mNoCookieMeter       metrics.Meter
-	mSafariRequestMeter  metrics.Meter
-	mSafariNoCookieMeter metrics.Meter
-	mErrorMeter          metrics.Meter
-	mInvalidMeter        metrics.Meter
-	mRequestTimer        metrics.Timer
-	mCookieSyncMeter     metrics.Meter
-
-	adapterMetrics map[string]*AdapterMetrics
-
-	accountMetrics        map[string]*AccountMetrics // FIXME -- this seems like an unbounded queue
-	accountMetricsRWMutex sync.RWMutex
+const (
+	TYPE_INFLUXDB = "influxdb"
+	TYPE_GRAPHITE = "graphite"
+	TYPE_FILE     = "file"
 )
 
 type TransactionLogger interface {
-	logRequest()
-	logResponse()
+	LogTransaction(string, string, string, int)
 }
 
-type GraphiteLogger struct {
+func SetupLogging(m config.Metrics, e map[string]adapters.Adapter) TransactionLogger {
+	//TODO: Replace with switch case for each different type of logging
+	return setupMetrics(m, e)
 }
-
-func (gl *GraphiteLogger) logRequest() {}
-
-func (gl *GraphiteLogger) logResponse() {}
-
-type FileLogger struct {
-}
-
-func (fl *FileLogger) logRequest() {}
-
-func (fl *FileLogger) logResponse() {}
