@@ -1,16 +1,16 @@
-package logging
+package logs
 
 import (
 	"fmt"
+	"github.com/cyberdelia/go-metrics-graphite"
+	"github.com/golang/glog"
 	"github.com/prebid/prebid-server/adapters"
+	"github.com/prebid/prebid-server/config"
 	"github.com/rcrowley/go-metrics"
+	"github.com/vrischmann/go-metrics-influxdb"
+	"net"
 	"sync"
 	"time"
-	"net"
-	"github.com/golang/glog"
-	"github.com/prebid/prebid-server/config"
-	"github.com/vrischmann/go-metrics-influxdb"
-	"github.com/cyberdelia/go-metrics-graphite"
 )
 
 type DomainMeterMetrics struct {
@@ -55,7 +55,7 @@ type PBSMetrics struct {
 	accountMetricsRWMutex sync.RWMutex
 }
 
-func setupMetrics(settings config.Metrics, exchanges map[string]adapters.Adapter) (*PBSMetrics) {
+func setupMetrics(settings config.Metrics, exchanges map[string]adapters.Adapter) *PBSMetrics {
 	return setup(initReporting(settings), exchanges)
 }
 
@@ -155,92 +155,15 @@ func (m *PBSMetrics) GetMyAccountMetrics(id string) *AccountMetrics {
 	return am
 }
 
+
+
 func (m *PBSMetrics) LogTransaction(reqType string, request string, response string, statusCode int) {
 	fmt.Println("Request type: ", reqType)
 	fmt.Println("\nRequest body: ", request)
 	fmt.Println("\nResponse :", response)
 	fmt.Println("\nResponse code: ", statusCode, "\n\n")
-}
+	switch reqType{
+	//TODO: handle each request accordingly
 
-func (m *PBSMetrics) GetMyAdapterMetrics(bidderCode string) *AdapterMetrics {
-	return m.adapterMetrics[bidderCode]
-}
-
-func (m *PBSMetrics) UpdateRequestTimerSince(start time.Time) {
-	m.mRequestTimer.UpdateSince(start)
-}
-
-func (m *PBSMetrics) IncRequest(i int64) {
-	m.mRequestMeter.Mark(i)
-}
-
-func (m *PBSMetrics) IncSafariRequest(i int64) {
-	m.mSafariRequestMeter.Mark(i)
-}
-
-func (m *PBSMetrics) IncAppRequest(i int64) {
-	m.mAppRequestMeter.Mark(i)
-}
-
-func (m *PBSMetrics) IncNoCookie(i int64) {
-	m.mNoCookieMeter.Mark(i)
-}
-
-func (m *PBSMetrics) IncSafariNoCookie(i int64) {
-	m.mSafariNoCookieMeter.Mark(i)
-}
-
-func (m *PBSMetrics) IncError(i int64) {
-	m.mErrorMeter.Mark(i)
-}
-
-func (m *PBSMetrics) IncCookieSync(i int64) {
-	m.mCookieSyncMeter.Mark(i)
-}
-
-func (am *AccountMetrics) GetMyAdapterMetrics(bidderCode string) *AdapterMetrics {
-	return am.AdapterMetrics[bidderCode]
-}
-
-func (am *AccountMetrics) IncBidsReceived(i int64) {
-	am.BidsReceivedMeter.Mark(i)
-}
-
-func (am *AccountMetrics) IncRequest(i int64) {
-	am.RequestMeter.Mark(i)
-}
-
-func (am *AccountMetrics) UpdatePriceHistogram(cpm int64) {
-	am.PriceHistogram.Update(cpm)
-}
-
-func (am *AdapterMetrics) IncNoBid(i int64) {
-	am.NoBidMeter.Mark(i)
-}
-
-func (am *AdapterMetrics) IncBidsReceived(i int64) {
-	am.BidsReceivedMeter.Mark(i)
-}
-
-func (am *AdapterMetrics) UpdateRequestTimerSince(start time.Time) {
-	am.RequestTimer.UpdateSince(start)
-}
-
-func (am *AdapterMetrics) IncError(i int64) {
-	am.ErrorMeter.Mark(i)
-}
-
-func (am *AdapterMetrics) IncTimeOut(i int64) {
-	am.TimeoutMeter.Mark(i)
-}
-
-func (am *AdapterMetrics) UpdatePriceHistogram(cpm int64) {
-	am.PriceHistogram.Update(cpm)
-}
-
-func (am *AdapterMetrics) IncRequest(i int64) {
-	am.RequestMeter.Mark(i)
-}
-func (am *AdapterMetrics) IncNoCookie(i int64) {
-	am.NoCookieMeter.Mark(i)
+	}
 }

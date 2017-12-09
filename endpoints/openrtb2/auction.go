@@ -1,27 +1,28 @@
 package openrtb2
 
 import (
-	"github.com/julienschmidt/httprouter"
-	"net/http"
-	"github.com/mxmCherry/openrtb"
-	"encoding/json"
-	"github.com/prebid/prebid-server/exchange"
-	"fmt"
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
-	"github.com/prebid/prebid-server/openrtb_ext"
-	"time"
+	"fmt"
+	"github.com/buger/jsonparser"
 	"github.com/evanphx/json-patch"
-	"github.com/prebid/prebid-server/stored_requests"
+	"github.com/golang/glog"
+	"github.com/julienschmidt/httprouter"
+	"github.com/mxmCherry/openrtb"
 	"github.com/prebid/prebid-server/config"
+	"github.com/prebid/prebid-server/exchange"
+	"github.com/prebid/prebid-server/logs"
+	"github.com/prebid/prebid-server/openrtb_ext"
+	"github.com/prebid/prebid-server/stored_requests"
 	"io"
 	"io/ioutil"
-	"github.com/buger/jsonparser"
-	"github.com/golang/glog"
-	"github.com/prebid/prebid-server/logging"
+	"net/http"
+	"time"
 )
 
-func NewEndpoint(ex exchange.Exchange, validator openrtb_ext.BidderParamValidator, requestsById stored_requests.Fetcher, cfg *config.Configuration, logger *logging.TransactionLogger, url string) (httprouter.Handle, error) {
+func NewEndpoint(ex exchange.Exchange, validator openrtb_ext.BidderParamValidator, requestsById stored_requests.Fetcher, cfg *config.Configuration, logger *logs.TransactionLogger, url string) (httprouter.Handle, error) {
 	if ex == nil || validator == nil || requestsById == nil || cfg == nil {
 		return nil, errors.New("NewEndpoint requires non-nil arguments.")
 	}
@@ -34,27 +35,35 @@ type endpointDeps struct {
 	paramsValidator  openrtb_ext.BidderParamValidator
 	storedReqFetcher stored_requests.Fetcher
 	cfg              *config.Configuration
-	Logger           *logging.TransactionLogger
+	Logger           *logs.TransactionLogger
 	url              string
 }
 
 func (deps *endpointDeps) Auction(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
 	req, ctx, cancel, errL := deps.parseRequest(r)
+	logParams := logs.LogParams{
+		ReqType:     deps.url,
+		Request:     bidRequestToString(req),
+		W:           &w,
+		StatusCode:  http.StatusOK,
+		ResponseMsg: "",
+		Logger:      deps.Logger}
+
 	defer cancel() // Safe because parseRequest returns a no-op even if errors are present.
 	if len(errL) > 0 {
-		w.WriteHeader(http.StatusBadRequest)
+		var b bytes.Buffer
 		for _, err := range errL {
-			w.Write([]byte(fmt.Sprintf("Invalid request format: %s\n", err.Error())))
+			b.WriteString(fmt.Sprintf("Invalid request format: %s\n", err.Error()))
 		}
-		(*deps.Logger).LogTransaction(deps.url, req.ToString(), fmt.Sprintf("Invalid request format"), http.StatusBadRequest)
+		logParams.StatusCode, logParams.ResponseMsg = http.StatusBadRequest, b.String()
+		logParams.Write()
 		return
 	}
 
 	response, err := deps.ex.HoldAuction(ctx, req)
 	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		fmt.Fprintf(w, "Critical error while running the auction: %v", err)
-		(*deps.Logger).LogTransaction(deps.url, req.ToString(), fmt.Sprintf("Critical error while running the auction: %v", err), http.StatusInternalServerError)
+		logParams.StatusCode, logParams.ResponseMsg = http.StatusInternalServerError, fmt.Sprintf("Critical error while running the auction: %v", err)
+		logParams.Write()
 		return
 	}
 
@@ -66,9 +75,11 @@ func (deps *endpointDeps) Auction(w http.ResponseWriter, r *http.Request, _ http
 	// If we've sent _any_ bytes, then Go would have sent the 200 status code first.
 	// That status code can't be un-sent... so the best we can do is log the error.
 	if err := enc.Encode(response); err != nil {
-		glog.Errorf("/openrtb2/auction Error encoding response: %v", err)
+		glog.Errorf("/openrtb2/auction LogParams encoding response: %v", err)
 	}
-	(*deps.Logger).LogTransaction(deps.url, req.ToString(), response.ToString(), http.StatusOK)
+
+	logParams.ResponseMsg = bidResponseToString(response)
+	logParams.Write()
 }
 
 // parseRequest turns the HTTP request into an OpenRTB request. This is guaranteed to return:

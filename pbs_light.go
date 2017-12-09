@@ -46,6 +46,7 @@ import (
 	"github.com/prebid/prebid-server/config"
 	"github.com/prebid/prebid-server/endpoints/openrtb2"
 	"github.com/prebid/prebid-server/exchange"
+	"github.com/prebid/prebid-server/logs"
 	"github.com/prebid/prebid-server/openrtb_ext"
 	"github.com/prebid/prebid-server/pbs"
 	"github.com/prebid/prebid-server/pbs/buckets"
@@ -57,7 +58,6 @@ import (
 	"github.com/prebid/prebid-server/stored_requests/backends/empty_fetcher"
 	"github.com/prebid/prebid-server/stored_requests/backends/file_fetcher"
 	"strings"
-	"github.com/prebid/prebid-server/logging"
 )
 
 type DomainMetrics struct {
@@ -184,36 +184,61 @@ type cookieSyncRequest struct {
 	Bidders []string `json:"bidders"`
 }
 
+func (csr *cookieSyncRequest) String() string {
+	if b, err := json.Marshal(csr); err == nil {
+		return string(b)
+	}
+	return "LogParams during json marshal of cookieSyncRequest "
+}
+
 type cookieSyncResponse struct {
 	UUID         string           `json:"uuid"`
 	Status       string           `json:"status"`
 	BidderStatus []*pbs.PBSBidder `json:"bidder_status"`
 }
 
-type CookieSyncDeps struct{
-	Logger *logging.TransactionLogger
-	url string
+func (csr *cookieSyncResponse) String() string {
+	if b, err := json.Marshal(csr); err == nil {
+		return string(b)
+	}
+	return "LogParams during json marshal of cookieSyncResponse "
 }
 
-func (c *CookieSyncDeps) cookieSync(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
+type cookieSyncDeps struct {
+	Logger *logs.TransactionLogger
+}
+
+func (c *cookieSyncDeps) cookieSync(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
 	mCookieSyncMeter.Mark(1)
-	userSyncCookie := pbs.ParsePBSCookieFromRequest(r, &(hostCookieSettings.OptOutCookie))
-	if !userSyncCookie.AllowSyncs() {
-		http.Error(w, "User has opted out", http.StatusUnauthorized)
-		return
-	}
-
-	defer r.Body.Close()
-
 	csReq := &cookieSyncRequest{}
 	err := json.NewDecoder(r.Body).Decode(&csReq)
+
+	logParams := logs.LogParams{
+		ReqType:     COOKIESYNC,
+		Request:     csReq.String(),
+		W:           &w,
+		StatusCode:  http.StatusOK,
+		ResponseMsg: "",
+		Logger:      c.Logger,
+	}
+
 	if err != nil {
 		if glog.V(2) {
 			glog.Infof("Failed to parse /cookie_sync request body: %v", err)
 		}
-		http.Error(w, "JSON parse failed", http.StatusBadRequest)
+		logParams.StatusCode, logParams.ResponseMsg = http.StatusBadRequest, "JSON parse failed"
+		logParams.Write()
 		return
 	}
+
+	userSyncCookie := pbs.ParsePBSCookieFromRequest(r, &(hostCookieSettings.OptOutCookie))
+	if !userSyncCookie.AllowSyncs() {
+		logParams.StatusCode, logParams.ResponseMsg = http.StatusUnauthorized, "User has opted out"
+		logParams.Write()
+		return
+	}
+
+	defer r.Body.Close()
 
 	csResp := cookieSyncResponse{
 		UUID:         csReq.UUID,
@@ -243,7 +268,8 @@ func (c *CookieSyncDeps) cookieSync(w http.ResponseWriter, r *http.Request, _ ht
 	enc.SetEscapeHTML(false)
 	//enc.SetIndent("", "  ")
 	enc.Encode(csResp)
-	(*c.Logger).LogTransaction(c.url, string(csReq), string(csResp), http.StatusOK )
+	logParams.ResponseMsg = csResp.String()
+	logParams.Write()
 }
 
 type auctionDeps struct {
@@ -269,7 +295,7 @@ func (deps *auctionDeps) auction(w http.ResponseWriter, r *http.Request, _ httpr
 		if glog.V(2) {
 			glog.Infof("Failed to parse /auction request: %v", err)
 		}
-		writeAuctionError(w, "Error parsing request", err)
+		writeAuctionError(w, "LogParams parsing request", err)
 		mErrorMeter.Mark(1)
 		return
 	}
@@ -346,7 +372,7 @@ func (deps *auctionDeps) auction(w http.ResponseWriter, r *http.Request, _ httpr
 						ametrics.ErrorMeter.Mark(1)
 						accountAdapterMetric.ErrorMeter.Mark(1)
 						bidder.Error = err.Error()
-						glog.Warningf("Error from bidder %v. Ignoring all bids: %v", bidder.BidderCode, err)
+						glog.Warningf("LogParams from bidder %v. Ignoring all bids: %v", bidder.BidderCode, err)
 					}
 				} else if bid_list != nil {
 					bid_list = checkForValidBidSize(bid_list, bidder)
@@ -646,7 +672,7 @@ func validate(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
 	js := gojsonschema.NewStringLoader(string(b))
 	result, err := reqSchema.Validate(js)
 	if err != nil {
-		fmt.Fprintf(w, "Error parsing json: %v\n", err)
+		fmt.Fprintf(w, "LogParams parsing json: %v\n", err)
 		return
 	}
 
@@ -656,7 +682,7 @@ func validate(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
 	}
 
 	for _, err := range result.Errors() {
-		fmt.Fprintf(w, "Error: %s %v\n", err.Context().String(), err)
+		fmt.Fprintf(w, "LogParams: %s %v\n", err.Context().String(), err)
 	}
 
 	return
@@ -689,13 +715,13 @@ func loadDataCache(cfg *config.Configuration) (err error) {
 	case "postgres":
 		dataCache, err = loadPostgresDataCache(cfg)
 		if err != nil {
-			return fmt.Errorf("PostgresCache Error: %s", err.Error())
+			return fmt.Errorf("PostgresCache LogParams: %s", err.Error())
 		}
 
 	case "filecache":
 		dataCache, err = filecache.New(cfg.DataCache.Filename)
 		if err != nil {
-			return fmt.Errorf("FileCache Error: %s", err.Error())
+			return fmt.Errorf("FileCache LogParams: %s", err.Error())
 		}
 
 	default:
@@ -800,7 +826,7 @@ func serve(cfg *config.Configuration) error {
 	}
 
 	setupExchanges(cfg)
-	logger := logging.SetupLogging(cfg.Metrics, exchanges)
+	logger := logs.SetupLogging(cfg.Metrics, exchanges)
 
 	if cfg.Metrics.Host != "" {
 		go influxdb.InfluxDB(
@@ -867,7 +893,7 @@ func serve(cfg *config.Configuration) error {
 	router.POST(AUCTION, (&auctionDeps{cfg}).auction)
 	router.POST(OPENRTB2_AUCTION, openrtbEndpoint)
 	router.GET("/bidders/params", NewJsonDirectoryServer(paramsValidator))
-	router.POST(COOKIESYNC, (&CookieSyncDeps{&logger, COOKIESYNC}).cookieSync)
+	router.POST(COOKIESYNC, (&cookieSyncDeps{&logger}).cookieSync)
 
 	router.POST("/validate", validate)
 	router.GET("/status", status)
